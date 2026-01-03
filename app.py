@@ -5,7 +5,7 @@ app = Flask(__name__)
 
 # Настройка подключения к PostgreSQL
 # Формат: postgresql://логин:пароль@localhost/имя_базы
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://nri_user:nri_password@localhost/nri_db'
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://ttrpg_user:ttrpg_password@localhost/ttrpg_db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)

@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>НРИ Менеджер</title>
+    <style>
+        body { font-family: sans-serif; background: #eee; padding: 20px; }
+        .card { background: white; padding: 15px; border-radius: 10px; margin-bottom: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .btn { padding: 8px 12px; border: none; border-radius: 4px; color: white; text-decoration: none; cursor: pointer; }
+        .btn-create { background: #28a745; margin-bottom: 20px; display: inline-block; }
+        .btn-up { background: #ffc107; color: black; }
+        .btn-add { background: #007bff; }
+    </style>
+</head>
+<body>
+    <h1>Список персонажей</h1>
+    <a href="/create" class="btn btn-create">Создать нового персонажа</a>
+
+    {% for char in characters %}
+    <div class="card">
+        <h2>{{ char.name }} (Ранг {{ char.rank }})</h2>
+        <p><b>Атрибуты:</b> Тело {{ char.body }}, Разум {{ char.mind }}, Дух {{ char.spirit }}</p>
+        <p><b>Достоинства:</b> {% for a in char.advantages %}{{ a.name }} ({{ a.value }}){% endfor %}</p>
+        <p><b>Чудеса:</b> {% for m in char.miracles %}{{ m.name }} (Ранг {{ m.rank }}){% endfor %}</p>
+        <p><b>Опыт:</b> {{ char.exp }}</p>
+
+        <form action="/add_exp/{{ char.id }}" method="POST" style="display:inline;">
+            <input type="number" name="amount" placeholder="EXP" style="width:60px;" required>
+            <button type="submit" class="btn btn-add">Добавить</button>
+        </form>
+        <a href="/upgrade/{{ char.id }}" class="btn btn-up">Улучшить</a>
+    </div>
+    {% endfor %}
+</body>
+</html>

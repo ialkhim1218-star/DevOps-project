@@ -1,0 +1,151 @@
+import logging
+from flask import Flask, render_template, request, redirect, url_for
+from flask_sqlalchemy import SQLAlchemy
+
+app = Flask(__name__)
+
+# --- НАСТРОЙКА ЛОГИРОВАНИЯ ---
+logging.basicConfig(
+    filename='app.log',
+    level=logging.INFO,
+    format='%(asctime)s %(levelname)s: %(message)s'
+)
+
+# --- НАСТРОЙКА БАЗЫ ДАННЫХ ---
+app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://ttrpg_user:ttrpg_password@localhost/ttrpg_db'
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
+
+# --- СТРУКТУРА НАВЫКОВ ---
+SKILLS_MAP = {
+    'Тело': ['dexterity', 'accuracy', 'agility', 'strength', 'endurance'],
+    'Разум': ['perception', 'knowledge', 'insight', 'reason', 'wit'],
+    'Дух': ['eloquence', 'leadership', 'charm', 'deception', 'composure']
+}
+
+# --- МОДЕЛИ ---
+class Character(db.Model):
+    __tablename__ = 'characters'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    rank = db.Column(db.Integer, default=1)
+    exp = db.Column(db.Integer, default=0)
+    
+    # Атрибуты
+    body = db.Column(db.Integer, default=4)
+    mind = db.Column(db.Integer, default=4)
+    spirit = db.Column(db.Integer, default=4)
+
+    # Навыки (динамическое создание колонок для краткости примера в коде)
+    dexterity = db.Column(db.Integer, default=4); accuracy = db.Column(db.Integer, default=4)
+    agility = db.Column(db.Integer, default=4); strength = db.Column(db.Integer, default=4)
+    endurance = db.Column(db.Integer, default=4); perception = db.Column(db.Integer, default=4)
+    knowledge = db.Column(db.Integer, default=4); insight = db.Column(db.Integer, default=4)
+    reason = db.Column(db.Integer, default=4); wit = db.Column(db.Integer, default=4)
+    eloquence = db.Column(db.Integer, default=4); leadership = db.Column(db.Integer, default=4)
+    charm = db.Column(db.Integer, default=4); deception = db.Column(db.Integer, default=4)
+    composure = db.Column(db.Integer, default=4)
+
+    advantages = db.relationship('Advantage', backref='character', cascade="all, delete-orphan")
+    miracles = db.relationship('Miracle', backref='character', cascade="all, delete-orphan")
+
+class Advantage(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    char_id = db.Column(db.Integer, db.ForeignKey('characters.id'))
+    name = db.Column(db.String(100))
+    value = db.Column(db.Integer, default=1)
+
+class Miracle(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    char_id = db.Column(db.Integer, db.ForeignKey('characters.id'))
+    name = db.Column(db.String(100))
+    rank = db.Column(db.Integer, default=1)
+
+# --- МАРШРУТЫ ---
+
+@app.route('/')
+def index():
+    characters = Character.query.all()
+    return render_template('index.html', characters=characters)
+
+@app.route('/create', methods=['GET', 'POST'])
+def create():
+    if request.method == 'POST':
+        d = request.form
+        rank = int(d.get('rank', 1))
+        
+        # Расчет очков (Этап 5)
+        attr_pts = (int(d['body'])-4 + int(d['mind'])-4 + int(d['spirit'])-4) * 10
+        skill_pts = 0
+        for category in SKILLS_MAP.values():
+            for s in category:
+                skill_pts += (int(d.get(s, 4)) - 4) * 5
+        
+        limit = rank * 20
+        if attr_pts + skill_pts > limit:
+            return f"Ошибка: Нужно {attr_pts+skill_pts} очков, доступно {limit}"
+
+        # Создание
+        new_char = Character(name=d['name'], rank=rank, body=int(d['body']), mind=int(d['mind']), spirit=int(d['spirit']))
+        for cat in SKILLS_MAP.values():
+            for s in cat: setattr(new_char, s, int(d.get(s, 4)))
+        
+        if d.get('adv_name'):
+            new_char.advantages.append(Advantage(name=d['adv_name'], value=int(d.get('adv_val', 1))))
+        if d.get('mir_name'):
+            new_char.miracles.append(Miracle(name=d['mir_name'], rank=int(d.get('mir_rank', 1))))
+
+        db.session.add(new_char)
+        db.session.commit()
+        logging.info(f"Создан персонаж {new_char.name}")
+        return redirect(url_for('index'))
+    return render_template('create.html', skills_map=SKILLS_MAP)
+
+@app.route('/add_exp/<int:char_id>', methods=['POST'])
+def add_exp(char_id):
+    char = Character.query.get_or_404(char_id)
+    amount = int(request.form.get('amount', 0))
+    char.exp += amount
+    db.session.commit()
+    return redirect(url_for('index'))
+
+@app.route('/upgrade/<int:char_id>', methods=['GET', 'POST'])
+def upgrade(char_id):
+    char = Character.query.get_or_404(char_id)
+    if request.method == 'POST':
+        param = request.form.get('param')
+        curr_val = getattr(char, param) or 4
+        cost = (curr_val + 1) * (10 if param in ['body','mind','spirit'] else 5)
+        
+        if char.exp >= cost:
+            char.exp -= cost
+            setattr(char, param, curr_val + 1)
+            db.session.commit()
+            logging.info(f"{char.name} прокачал {param} до {curr_val+1}")
+        return redirect(url_for('upgrade', char_id=char.id))
+    return render_template('upgrade.html', char=char, skills_map=SKILLS_MAP, getattr=getattr)
+
+@app.route('/upgrade_adv/<int:adv_id>')
+def upgrade_adv(adv_id):
+    adv = Advantage.query.get_or_404(adv_id)
+    cost = (adv.value + 1) * 5
+    if adv.character.exp >= cost:
+        adv.character.exp -= cost
+        adv.value += 1
+        db.session.commit()
+    return redirect(url_for('upgrade', char_id=adv.character.id))
+
+@app.route('/upgrade_mir/<int:mir_id>')
+def upgrade_mir(mir_id):
+    mir = Miracle.query.get_or_404(mir_id)
+    cost = (mir.rank + 1) * 15
+    if mir.character.exp >= cost:
+        mir.character.exp -= cost
+        mir.rank += 1
+        db.session.commit()
+    return redirect(url_for('upgrade', char_id=mir.character.id))
+
+if __name__ == '__main__':
+    with app.app_context():
+        db.create_all()
+    app.run(debug=True, hos

@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Улучшение персонажа</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; }
+        .grid { display: flex; flex-wrap: wrap; gap: 20px; }
+        .box { background: #fff; border: 1px solid #ddd; padding: 15px; border-radius: 8px; min-width: 280px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        .btn-up { background: #ffc107; border: none; padding: 4px 8px; cursor: pointer; font-size: 0.8em; border-radius: 4px; }
+        .btn-up:disabled { background: #ccc; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+    <h1>Прокачка: {{ char.name }} | Опыт: <span style="color: green;">{{ char.exp }}</span></h1>
+    <a href="/">← Назад к списку</a>
+    <hr>
+
+    <div class="grid">
+        <div class="box">
+            <h3>Атрибуты (x10)</h3>
+            {% for p in ['body','mind','spirit'] %}
+                {% set val = getattr(char, p) or 4 %}
+                {% set cost = (val + 1) * 10 %}
+                <p>{{ p }}: <b>{{ val }}</b> 
+                <form method="POST" style="display:inline;"><input type="hidden" name="param" value="{{ p }}">
+                <button type="submit" class="btn-up" {% if char.exp < cost %}disabled{% endif %}>Улучшить за {{ cost }}</button></form></p>
+            {% endfor %}
+        </div>
+
+        {% for cat, skills in skills_map.items() %}
+        <div class="box">
+            <h3>{{ cat }} (x5)</h3>
+            {% for s in skills %}
+                {% set val = getattr(char, s) or 4 %}
+                {% set cost = (val + 1) * 5 %}
+                <p>{{ s }}: <b>{{ val }}</b>
+                <form method="POST" style="display:inline;"><input type="hidden" name="param" value="{{ s }}">
+                <button type="submit" class="btn-up" {% if char.exp < cost %}disabled{% endif %}>Улучшить за {{ cost }}</button></form></p>
+            {% endfor %}
+        </div>
+        {% endfor %}
+
+        <div class="box">
+            <h3>Достоинства (x5)</h3>
+            {% for a in char.advantages %}
+                {% set cost = (a.value + 1) * 5 %}
+                <p>{{ a.name }}: <b>{{ a.value }}</b> 
+                <a href="/up_adv/{{ a.id }}"><button class="btn-up" {% if char.exp < cost %}disabled{% endif %}>Улучшить за {{ cost }}</button></a></p>
+            {% endfor %}
+
+            <h3>Чудеса (x Ранг * 2)</h3>
+            {% for m in char.miracles %}
+                {% set cost = (m.level + 1) * m.rank * 2 %}
+                <p>{{ m.name }} (Ранг: {{ m.rank }}): <b>Ур. {{ m.level }}</b> 
+                <a href="/up_mir/{{ m.id }}"><button class="btn-up" {% if char.exp < cost %}disabled{% endif %}>Улучшить за {{ cost }}</button></a></p>
+            {% endfor %}
+        </div>
+    </div>
+</body>
+</html>

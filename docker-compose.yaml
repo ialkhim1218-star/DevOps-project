@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  # Сервис базы данных
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: ttrpg_user        # Те же данные, что в app.py
+      POSTGRES_PASSWORD: ttrpg_password
+      POSTGRES_DB: ttrpg_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: always
+
+  # Сервис вашего приложения
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.opt  # Используем наш оптимизированный файл!
+    ports:
+      - "5000:5000"
+    environment:
+      # Ключевой момент: адрес базы — это имя сервиса 'db'
+      - DATABASE_URL=postgresql://ttrpg_user:ttrpg_password@db:5432/ttrpg_db
+    depends_on:
+      - db
+
+volumes:
+  postgres_data:

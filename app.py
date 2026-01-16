@@ -1,12 +1,31 @@
 import logging
 from flask import Flask, render_template, request, redirect, url_for
 from flask_sqlalchemy import SQLAlchemy
+# 1. Импортируем библиотеку для метрик
+from prometheus_flask_exporter import PrometheusMetrics
+
+import os
 
 app = Flask(__name__)
 
+# --- ГАРАНТИРОВАННАЯ ИНИЦИАЛИЗАЦИЯ МЕТРИК ---
+try:
+    # Задаем настройки экспортера явно
+    metrics = PrometheusMetrics(app)
+    # Принудительно регистрируем эндпоинт, если он не создался сам
+    print("Метрики успешно инициализированы")
+except Exception as e:
+    print(f"Ошибка инициализации метрик: {e}")
+
+char_create_counter = metrics.counter(
+	'character_creation_total', 'Количество созданных персонажей'
+)
+
+# Вывод всех зарегистрированных путей в консоль при старте
 logging.basicConfig(filename='app.log', level=logging.INFO, format='%(asctime)s %(levelname)s: %(message)s')
 
-app.config['SQLALCHEMY_DATABASE_URI'] = 'postgresql://ttrpg_user:ttrpg_password@localhost/ttrpg_db'
+default_db = 'postgresql://ttrpg_user:ttrpg_password@localhost:5432/ttrpg_db'
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URL', default_db)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
 
@@ -25,6 +44,7 @@ class Character(db.Model):
     rank = db.Column(db.Integer, default=1)
     exp = db.Column(db.Integer, default=0)
     body = db.Column(db.Integer, default=4); mind = db.Column(db.Integer, default=4); spirit = db.Column(db.Integer, default=4)
+    
     # Навыки
     dexterity = db.Column(db.Integer, default=4); accuracy = db.Column(db.Integer, default=4)
     agility = db.Column(db.Integer, default=4); strength = db.Column(db.Integer, default=4)
@@ -42,14 +62,14 @@ class Advantage(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     char_id = db.Column(db.Integer, db.ForeignKey('characters.id'))
     name = db.Column(db.String(100))
-    value = db.Column(db.Integer, default=1) # Это уровень/сила
+    value = db.Column(db.Integer, default=1) 
 
 class Miracle(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     char_id = db.Column(db.Integer, db.ForeignKey('characters.id'))
     name = db.Column(db.String(100))
-    rank = db.Column(db.Integer, default=1)   # Ранг (вводится)
-    level = db.Column(db.Integer, default=1)  # Уровень (закупается)
+    rank = db.Column(db.Integer, default=1)   
+    level = db.Column(db.Integer, default=1)  
 
 # --- МАРШРУТЫ ---
 
@@ -63,17 +83,14 @@ def create():
         f = request.form
         char_rank = int(f.get('rank', 1))
         
-        # 1. Считаем очки за Атрибуты и Навыки
         total_spent = (int(f['body'])-4 + int(f['mind'])-4 + int(f['spirit'])-4) * 10
         for cat in SKILLS_MAP.values():
             for s in cat: total_spent += (int(f.get(s, 4)) - 4) * 5
         
-        # 2. Считаем Достоинства (допустим, 5 за уровень)
         adv_names = f.getlist('adv_name[]')
         adv_vals = f.getlist('adv_val[]')
         for v in adv_vals: total_spent += int(v) * 5
 
-        # 3. Считаем Чудеса (Уровень * Ранг)
         mir_names = f.getlist('mir_name[]')
         mir_ranks = f.getlist('mir_rank[]')
         mir_levels = f.getlist('mir_level[]')
@@ -83,7 +100,6 @@ def create():
         if total_spent > char_rank * 20:
             return f"Перебор! Потрачено {total_spent}, лимит {char_rank*20}"
 
-        # Сохранение
         new_char = Character(name=f['name'], rank=char_rank, body=int(f['body']), mind=int(f['mind']), spirit=int(f['spirit']))
         for cat in SKILLS_MAP.values():
             for s in cat: setattr(new_char, s, int(f.get(s, 4)))
@@ -95,6 +111,11 @@ def create():
 
         db.session.add(new_char)
         db.session.commit()
+        try:
+            char_create_counter.inc()
+        except Exception as e:
+            app.logger.error(f"Metric error: {e}")
+        logging.info(f"Создан персонаж: {new_char.name}")
         return redirect(url_for('index'))
     return render_template('create.html', skills_map=SKILLS_MAP)
 
@@ -109,6 +130,7 @@ def upgrade(char_id):
             char.exp -= cost
             setattr(char, param, curr + 1)
             db.session.commit()
+            logging.info(f"Персонаж {char.name} улучшил {param}")
         return redirect(url_for('upgrade', char_id=char.id))
     return render_template('upgrade.html', char=char, skills_map=SKILLS_MAP, getattr=getattr)
 
@@ -125,7 +147,6 @@ def up_adv(id):
 @app.route('/up_mir/<int:id>')
 def up_mir(id):
     obj = Miracle.query.get_or_404(id)
-    # Формула: (Текущий уровень + 1) * Ранг * 2
     cost = (obj.level + 1) * obj.rank * 2
     if obj.character.exp >= cost:
         obj.character.exp -= cost
@@ -136,10 +157,18 @@ def up_mir(id):
 @app.route('/add_exp/<int:char_id>', methods=['POST'])
 def add_exp(char_id):
     char = Character.query.get_or_404(char_id)
-    char.exp += int(request.form.get('amount', 0))
+    amount = int(request.form.get('amount', 0))
+    char.exp += amount
     db.session.commit()
+    logging.info(f"Добавлено {amount} опыта персонажу {char.name}")
     return redirect(url_for('index'))
 
 if __name__ == '__main__':
-    with app.app_context(): db.create_all()
-    app.run(debug=True, host='0.0.0.0')
+    with app.app_context():
+        db.create_all()
+    with app.app_context():
+        print("\n--- СПИСОК ЗАРЕГИСТРИРОВАННЫХ МАРШРУТОВ ---")
+        for rule in app.url_map.iter_rules():
+            print(f"Доступен путь: {rule.rule}")
+        print("------------------------------------------\n")
+    app.run(debug=False, host='0.0.0.0', port=5000)
